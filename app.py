@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from google.cloud import bigquery
 import os
 import xgboost as xgb
@@ -168,7 +168,7 @@ def test_improvements_with_xgboost(avg_pitch_data, fastball_velo, model_category
         {
             'name': 'Less Armside Run',
             'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']},
-            'description': 'Less armside run'
+            'description': 'Less armside run (HB)'
         },
         {
             'name': 'Added Velocity with Carry',
@@ -176,19 +176,29 @@ def test_improvements_with_xgboost(avg_pitch_data, fastball_velo, model_category
                 'RelSpeed': avg_pitch_data['RelSpeed'] + (improvement_ranges['velo_improvement'] * 0.7),
                 'InducedVertBreak': avg_pitch_data['InducedVertBreak'] + (improvement_ranges['ivb_improvement'] * 0.7)
             },
-            'description': 'Added velocity with a little bit more carry/ride'
+            'description': 'Added velocity with a little bit more carry/ride (IVB)'
         },
         {
             'name': 'Added Carry',
             'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] + improvement_ranges['ivb_improvement']},
-            'description': 'Added carry'
+            'description': 'Added ride/carry (IVB)'
         },
         {
             'name': 'Add Velocity',
             'modifications': {'RelSpeed': avg_pitch_data['RelSpeed'] + improvement_ranges['velo_improvement']},
             'description': 'Add velocity'
-        }
-    ])
+        },
+            {
+        'name': 'More Armside Run',
+        'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']},
+        'description': 'More armside run (HB)'
+    },
+    {
+        'name': 'Added Sink',
+        'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement']},
+        'description': 'Reduce ride to get more sink'
+    }
+])
     
     # Add pitch-type specific scenarios for Fastball
     if model_category == 'Fastball':
@@ -212,17 +222,14 @@ def test_improvements_with_xgboost(avg_pitch_data, fastball_velo, model_category
                 'description': 'Throw faster and shift your release toward 3rd base.'
             }
         ])
-    
-    elif model_category == 'Breaking Balls':
-        # Test different velocity separations
-        current_velo_diff = abs(fastball_velo - avg_pitch_data['RelSpeed'])
-        improvement_scenarios.extend([
-            {
-                'name': 'Better Velocity Separation',
-                'modifications': {'RelSpeed': fastball_velo - (current_velo_diff + 1.5)},
-                'description': 'Slow it down more than your fastball.'
-            }
-        ])
+    if model_category in ['Fastball', 'Breaking Balls']:
+        shift_value = improvement_ranges['rel_side_improvement']
+        direction = 1 if pitcher_throws == 'Right' else -1
+        improvement_scenarios.append({
+            'name': 'Shifted Release Side',
+            'modifications': {'RelSide': avg_pitch_data['RelSide'] + (direction * shift_value)},
+            'description': 'Shifted release toward arm side'
+    })
     
     elif model_category == 'Offspeed':
         current_velo_diff = abs(fastball_velo - avg_pitch_data['RelSpeed'])
@@ -301,12 +308,12 @@ def predict_stuffplus(pitch_data, fastball_velo, model_category, batter_side='ri
 
 @app.route('/')
 def index():
-    """Show tables with XGBoost-based improvement recommendations"""
     if not client:
         return "BigQuery client not initialized"
+
+    selected_pitcher = request.args.get('pitcher', default=None)
     
     try:
-        # Query to get all needed data
         query = """
         SELECT 
             Pitcher,
@@ -330,12 +337,19 @@ def index():
         AND HorzBreak IS NOT NULL
         ORDER BY Pitcher, TaggedPitchType
         """
-        
+
+
+
+# Execute query and parse into list of dicts
         result = client.query(query)
-        raw_data = []
-        
-        for row in result:
-            raw_data.append(dict(row))
+        raw_data = [dict(row) for row in result]
+
+# Collect unique pitcher names for the dropdown
+        unique_pitchers = sorted(set(row['Pitcher'] for row in raw_data))
+
+# Filter by selected pitcher, if applicable
+        if selected_pitcher:
+            raw_data = [row for row in raw_data if row['Pitcher'] == selected_pitcher]
         
         # Group by pitcher and pitch type
         pitcher_data = {}
@@ -423,9 +437,13 @@ def index():
         # Sort by Stuff+ (highest first)
         table_data.sort(key=lambda x: x['stuffplus'] if isinstance(x['stuffplus'], (int, float)) else -999, reverse=True)
         
-        return render_template('improvements_table.html', 
-                             data=table_data,
-                             models_loaded=model_params is not None)
+
+        return render_template('improvements_table.html',
+                            data=table_data,
+                            models_loaded=model_params is not None,
+                            unique_pitchers=unique_pitchers,
+                            selected_pitcher=selected_pitcher
+)
     
     except Exception as e:
         print(f"Error: {str(e)}")
