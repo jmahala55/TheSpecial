@@ -159,59 +159,165 @@ def test_improvements_with_xgboost(avg_pitch_data, fastball_velo, model_category
     
     # Get pitcher handedness for release side direction guidance
     pitcher_throws = avg_pitch_data.get('PitcherThrows', 'Right')
+    is_righty = pitcher_throws == 'Right'
     
     # Define improvement scenarios to test with XGBoost
     improvement_scenarios = []
     
-    # Different options to achieve the best version of your pitch
-    improvement_scenarios.extend([
-        {
-            'name': 'Less Armside Run',
-            'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']},
-            'description': 'Less armside run (HB)'
-        },
-        {
-            'name': 'Added Velocity with Carry',
-            'modifications': {
-                'RelSpeed': avg_pitch_data['RelSpeed'] + (improvement_ranges['velo_improvement'] * 0.7),
-                'InducedVertBreak': avg_pitch_data['InducedVertBreak'] + (improvement_ranges['ivb_improvement'] * 0.7)
-            },
-            'description': 'Added velocity with a little bit more carry/ride (IVB)'
-        },
-        {
-            'name': 'Added Carry',
-            'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] + improvement_ranges['ivb_improvement']},
-            'description': 'Added ride/carry (IVB)'
-        },
-        {
-            'name': 'Add Velocity',
-            'modifications': {'RelSpeed': avg_pitch_data['RelSpeed'] + improvement_ranges['velo_improvement']},
-            'description': 'Add velocity'
-        },
-            {
-        'name': 'More Armside Run',
-        'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']},
-        'description': 'More armside run (HB)'
-    },
-    {
-        'name': 'Added Sink',
-        'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement']},
-        'description': 'Reduce ride to get more sink'
-    }
-])
-    
-    # Add pitch-type specific scenarios for Fastball
-    if model_category == 'Fastball':
+    # Universal scenarios - but exclude carry options for offspeed
+    if model_category != 'Offspeed':
         improvement_scenarios.extend([
+            {
+                'name': 'Added Velocity with Lift' if model_category == 'Breaking Balls' else 'Added Velocity with Carry',
+                'modifications': {
+                    'RelSpeed': avg_pitch_data['RelSpeed'] + (improvement_ranges['velo_improvement'] * 0.7),
+                    'InducedVertBreak': avg_pitch_data['InducedVertBreak'] + (improvement_ranges['ivb_improvement'] * 0.7)
+                },
+                'description': 'Added velocity with a little bit more lift (IVB)' if model_category == 'Breaking Balls' else 'Added velocity with a little bit more carry/ride (IVB)'
+            },
+            {
+                'name': 'Added Lift' if model_category == 'Breaking Balls' else 'Added Carry',
+                'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] + improvement_ranges['ivb_improvement']},
+                'description': 'Added lift (IVB)' if model_category == 'Breaking Balls' else 'Added ride/carry (IVB)'
+            }
+        ])
+    
+    # Add sink option only for fastballs, depth/drop for breaking balls
+    if model_category == 'Fastball':
+        improvement_scenarios.append({
+            'name': 'Added Sink',
+            'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement']},
+            'description': 'Reduce ride to get more sink'
+        })
+    elif model_category == 'Breaking Balls':
+        improvement_scenarios.append({
+            'name': 'More Depth/Drop',
+            'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement']},
+            'description': 'More downward break/drop'
+        })
+    
+    # Handedness-specific horizontal break scenarios
+    if model_category == 'Breaking Balls':
+        # Breaking ball specific scenarios based on handedness
+        if is_righty:
+            # For righties: negative HB = more sweep/cut, positive HB = more armside
+            improvement_scenarios.extend([
+                {
+                    'name': 'More Sweep',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']},
+                    'description': 'More sweep/cut action'
+                },
+                {
+                    'name': 'More Armside Run',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']},
+                    'description': 'More armside run'
+                },
+                {
+                    'name': 'Added Velo with More Depth/Drop',
+                    'modifications': {
+                        'RelSpeed': avg_pitch_data['RelSpeed'] + (improvement_ranges['velo_improvement'] * 0.7),
+                        'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement']
+                    },
+                    'description': 'Added velocity with more downward break/drop'
+                },
+                {
+                    'name': 'Added Velocity with Sweep',
+                    'modifications': {
+                        'RelSpeed': avg_pitch_data['RelSpeed'] + (improvement_ranges['velo_improvement'] * 0.7),
+                        'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']
+                    },
+                    'description': 'Added velocity with more sweep'
+                },
+                {
+                    'name': 'Added Velocity with Sweep',
+                    'modifications': {
+                        'RelSpeed': avg_pitch_data['RelSpeed'] + (improvement_ranges['velo_improvement'] * 0.7),
+                        'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']
+                    },
+                    'description': 'Added velocity with more sweep'
+                }
+            ])
+        else:
+            # For lefties: positive HB = more sweep/cut, negative HB = more armside
+            improvement_scenarios.extend([
+                {
+                    'name': 'More Sweep',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']},
+                    'description': 'More sweep/cut action'
+                },
+                {
+                    'name': 'More Armside Run',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']},
+                    'description': 'More armside run'
+                },
+                {
+                    'name': 'Tighter Break',
+                    'modifications': {
+                        'HorzBreak': avg_pitch_data['HorzBreak'] + (improvement_ranges['hb_improvement'] * 0.6),
+                        'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - (improvement_ranges['ivb_improvement'] * 0.4)
+                    },
+                    'description': 'Tighter, sharper break'
+                },
+                {
+                    'name': 'More Depth',
+                    'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement']},
+                    'description': 'More downward break/depth'
+                }
+            ])
+    
+    elif model_category == 'Fastball':
+        # Fastball specific scenarios (keep existing logic)
+        if is_righty:
+            improvement_scenarios.extend([
+                {
+                    'name': 'Less Armside Run',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']},
+                    'description': 'Less armside run'
+                },
+                {
+                    'name': 'More Armside Run',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']},
+                    'description': 'More armside run'
+                }
+            ])
+        else:
+            improvement_scenarios.extend([
+                {
+                    'name': 'Less Armside Run',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']},
+                    'description': 'Less armside run'
+                },
+                {
+                    'name': 'More Armside Run',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']},
+                    'description': 'More armside run'
+                }
+            ])
+        
+        # Additional fastball scenarios
+        improvement_scenarios.extend([
+            {
+                'name': 'Add Velocity',
+                'modifications': {'RelSpeed': avg_pitch_data['RelSpeed'] + improvement_ranges['velo_improvement']},
+                'description': 'Add velocity'
+            },
+            {
+                'name': 'More Sink and Run',
+                'modifications': {
+                    'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement'],
+                    'HorzBreak': avg_pitch_data['HorzBreak'] + (improvement_ranges['hb_improvement'] if is_righty else -improvement_ranges['hb_improvement'])
+                },
+                'description': 'More sink with armside run'
+            },
             {
                 'name': 'Lower Release Height',
                 'modifications': {'RelHeight': avg_pitch_data['RelHeight'] - improvement_ranges['rel_height_improvement']},
-                'description': 'Drop your release point a little lower.'
+                'description': 'Drop your release point a little lower'
             },
             {
                 'name': 'Higher Release Height',
                 'modifications': {'RelHeight': avg_pitch_data['RelHeight'] + improvement_ranges['rel_height_improvement']},
-                'description': 'Raise your release point a little higher.'
+                'description': 'Raise your release point a little higher'
             },
             {
                 'name': 'High Velocity + Release Point',
@@ -219,27 +325,71 @@ def test_improvements_with_xgboost(avg_pitch_data, fastball_velo, model_category
                     'RelSpeed': avg_pitch_data['RelSpeed'] + improvement_ranges['velo_improvement'],
                     'RelSide': avg_pitch_data['RelSide'] + (improvement_ranges['rel_side_improvement'] * 0.5)
                 },
-                'description': 'Throw faster and shift your release toward 3rd base.'
+                'description': 'Throw faster and shift your release toward 3rd base' if is_righty else 'Throw faster and shift your release toward 1st base'
             }
         ])
-    if model_category in ['Fastball', 'Breaking Balls']:
-        shift_value = improvement_ranges['rel_side_improvement']
-        direction = 1 if pitcher_throws == 'Right' else -1
-        improvement_scenarios.append({
-            'name': 'Shifted Release Side',
-            'modifications': {'RelSide': avg_pitch_data['RelSide'] + (direction * shift_value)},
-            'description': 'Shifted release toward arm side'
-    })
     
     elif model_category == 'Offspeed':
+        # Offspeed specific scenarios with handedness considerations
         current_velo_diff = abs(fastball_velo - avg_pitch_data['RelSpeed'])
+        
+        if is_righty:
+            improvement_scenarios.extend([
+                {
+                    'name': 'More Fade',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']},
+                    'description': 'More armside fade'
+                },
+                {
+                    'name': 'Less Armside Run',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']},
+                    'description': 'Reduce armside movement'
+                }
+            ])
+        else:
+            improvement_scenarios.extend([
+                {
+                    'name': 'More Fade',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] - improvement_ranges['hb_improvement']},
+                    'description': 'More armside fade'
+                },
+                {
+                    'name': 'Less Armside Run',
+                    'modifications': {'HorzBreak': avg_pitch_data['HorzBreak'] + improvement_ranges['hb_improvement']},
+                    'description': 'Reduce armside movement'
+                }
+            ])
+        
         improvement_scenarios.extend([
             {
                 'name': 'More Velocity Separation',
                 'modifications': {'RelSpeed': fastball_velo - (current_velo_diff + 2)},
-                'description': 'Slow it down a lot more than your fastball.'
+                'description': 'Slow it down a lot more than your fastball'
+            },
+            {
+                'name': 'More Tumble',
+                'modifications': {'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement']},
+                'description': 'More downward action/tumble'
+            },
+            {
+                'name': 'More Depth and Fade',
+                'modifications': {
+                    'InducedVertBreak': avg_pitch_data['InducedVertBreak'] - improvement_ranges['ivb_improvement'],
+                    'HorzBreak': avg_pitch_data['HorzBreak'] + (improvement_ranges['hb_improvement'] if is_righty else -improvement_ranges['hb_improvement'])
+                },
+                'description': 'More depth with armside fade'
             }
         ])
+    
+    # Add release side adjustments for fastballs and breaking balls
+    if model_category in ['Fastball', 'Breaking Balls']:
+        shift_value = improvement_ranges['rel_side_improvement']
+        direction = 1 if is_righty else -1
+        improvement_scenarios.append({
+            'name': 'Shifted Release Side',
+            'modifications': {'RelSide': avg_pitch_data['RelSide'] + (direction * shift_value)},
+            'description': 'Shifted release toward arm side'
+        })
     
     # Test each scenario using XGBoost models
     print(f"Testing {len(improvement_scenarios)} improvement scenarios for {model_category}...")
@@ -257,22 +407,10 @@ def test_improvements_with_xgboost(avg_pitch_data, fastball_velo, model_category
             gain = new_stuffplus - current_stuffplus
             
             # Only include improvements that actually help
-            if gain > 0.3:  # At least 0.3 Stuff+ improvement
-                
-                # Add release point guidance based on pitcher handedness and pitch type
-                description = scenario['description']
-                if 'release' in scenario['name'].lower() and pitcher_throws:
-                    if model_category == 'Breaking Balls':
-                        if pitcher_throws == 'Right':
-                            description += " (try toward 1st base for breaking balls)"
-                        else:
-                            description += " (try toward 3rd base for breaking balls)"
-                    elif model_category == 'Fastball':
-                        description += " (try both directions to mix it up)"
-                
+            if gain > 0.00000000001:  # At least 0.3 Stuff+ improvement
                 recommendations.append({
                     'improvement': scenario['name'],
-                    'description': description,
+                    'description': scenario['description'],
                     'modifications': scenario['modifications'],
                     'current_stuffplus': current_stuffplus,
                     'projected_stuffplus': new_stuffplus,
